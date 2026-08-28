@@ -24,12 +24,17 @@ class UserFactory extends Factory
      */
     public function definition(): array
     {
+        $callsign = strtoupper(fake()->unique()->bothify('??-###'));
+
         return [
-            'name' => fake()->name(),
+            'name' => $callsign,
+            'callsign' => $callsign,
+            'uuid' => (string) Str::uuid(),
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
+            'last_seen_at' => now(),
         ];
     }
 
