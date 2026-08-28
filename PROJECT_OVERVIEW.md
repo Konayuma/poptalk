@@ -11,6 +11,7 @@ Pop-Talk is a real-time voice walkie-talkie web app wrapped in a bold, vibrant P
 - **Audio Effects:** Optional vintage radio filter (bandpass filter + slight vinyl/crackle gain via Web Audio API).
 
 ## 3. Tech Stack
-- **Frontend:** React (Next.js or Vite), Tailwind CSS + Custom CSS (for halftone patterns & SVG filters), Framer Motion.
-- **Audio Processing:** Web Audio API (MediaRecorder / AudioContext).
-- **Real-Time Server:** Node.js + Socket.io or WebRTC (PeerJS for rapid prototyping).
+- **Frontend:** Vue 3, TypeScript, Vite, and custom CSS for the Pop Art interface.
+- **Audio Processing:** MediaDevices + Web Audio API (`AudioContext`, filters, analyser, and processed `MediaStream`).
+- **Application Server:** Laravel scaffold.
+- **Real-Time Relay:** Not selected yet. Channel presence and remote audio still require a defined WebRTC or WebSocket contract.
