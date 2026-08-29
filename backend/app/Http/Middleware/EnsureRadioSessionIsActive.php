@@ -16,17 +16,29 @@ class EnsureRadioSessionIsActive
     {
         $operator = $request->user();
 
-        if ($operator === null || $operator->isStale()) {
-            if ($operator !== null) {
+        if ($operator === null) {
+            return $this->expiredResponse();
+        }
+
+        $operator->unsetRelation('membership');
+        $operator->load('membership.frequency');
+
+        if ($operator->isStale() || $operator->membership === null) {
+            if ($operator->membership !== null) {
                 $this->walkieTalkie->disconnect($operator);
             }
 
-            return new JsonResponse([
-                'message' => 'The radio session has expired.',
-                'code' => 'invalid_session_token',
-            ], Response::HTTP_UNAUTHORIZED);
+            return $this->expiredResponse();
         }
 
         return $next($request);
+    }
+
+    private function expiredResponse(): JsonResponse
+    {
+        return new JsonResponse([
+            'message' => 'The radio session has expired.',
+            'code' => 'radio_session_expired',
+        ], Response::HTTP_UNAUTHORIZED);
     }
 }

@@ -33,7 +33,6 @@ vi.mock('../../services/radioApi', async (importOriginal) => {
 })
 
 const api = vi.mocked(radioApi)
-const SESSION_TOKEN_KEY = 'poptalk.radio-session-token'
 const connectedAt = '2026-08-28T11:00:00.000Z'
 
 function session(overrides: Partial<RadioSession> = {}): RadioSession {
@@ -108,18 +107,19 @@ beforeEach(() => {
   api.createSession.mockResolvedValue({
     data: session(),
     meta: {
-      session_token: 'new-session-token',
       heartbeat_interval_seconds: 10,
       presence_ttl_seconds: 30,
       server_time: connectedAt,
     },
   })
-  api.currentSession.mockResolvedValue({ data: session() })
-  api.updateSession.mockImplementation(async (_token, changes) => ({
+  api.currentSession.mockRejectedValue(
+    new RadioApiError('The radio session has expired.', 401, 'radio_session_expired'),
+  )
+  api.updateSession.mockImplementation(async (changes) => ({
     data: session(changes),
   }))
   api.heartbeatSession.mockResolvedValue({ data: session() })
-  api.channel.mockImplementation(async (_token, number) => ({
+  api.channel.mockImplementation(async (number) => ({
     data: channelStatus(number),
   }))
   api.channels.mockResolvedValue({ data: [channelStatus(7)] })
@@ -137,31 +137,28 @@ afterEach(() => {
 })
 
 describe('useRadioBackend', () => {
-  it('creates a session, stores its token, and loads channel presence', async () => {
+  it('creates a radio session and loads channel presence', async () => {
     const backend = mountBackend()
 
     await expect(backend.connect('ROOKIE-7', 7)).resolves.toBe(true)
 
     expect(api.createSession).toHaveBeenCalledWith('ROOKIE-7', 7)
-    expect(api.channel).toHaveBeenCalledWith('new-session-token', 7)
-    expect(window.sessionStorage.getItem(SESSION_TOKEN_KEY)).toBe('new-session-token')
+    expect(api.channel).toHaveBeenCalledWith(7)
     expect(backend.connectionState.value).toBe('connected')
     expect(backend.session.value).toEqual(session())
     expect(backend.remotePeerCount.value).toBe(0)
   })
 
-  it('replaces an expired stored session', async () => {
-    window.sessionStorage.setItem(SESSION_TOKEN_KEY, 'expired-token')
+  it('replaces an expired radio session', async () => {
     api.currentSession.mockRejectedValueOnce(
-      new RadioApiError('The session expired.', 401, 'invalid_session_token'),
+      new RadioApiError('The session expired.', 401, 'radio_session_expired'),
     )
     const backend = mountBackend()
 
     await expect(backend.connect('ROOKIE-7', 7)).resolves.toBe(true)
 
-    expect(api.currentSession).toHaveBeenCalledWith('expired-token')
+    expect(api.currentSession).toHaveBeenCalledOnce()
     expect(api.createSession).toHaveBeenCalledOnce()
-    expect(window.sessionStorage.getItem(SESSION_TOKEN_KEY)).toBe('new-session-token')
   })
 
   it('serializes rapid identity changes so the newest channel wins', async () => {
@@ -171,7 +168,7 @@ describe('useRadioBackend', () => {
     const firstUpdate = deferred<ResourceResponse<RadioSession>>()
     api.updateSession
       .mockImplementationOnce(() => firstUpdate.promise)
-      .mockImplementationOnce(async (_token, changes) => ({
+      .mockImplementationOnce(async (changes) => ({
         data: session(changes),
       }))
 
@@ -183,7 +180,7 @@ describe('useRadioBackend', () => {
 
     await expect(Promise.all([updateToEight, updateToNine])).resolves.toEqual([true, true])
     expect(api.updateSession).toHaveBeenCalledTimes(2)
-    expect(api.updateSession).toHaveBeenLastCalledWith('new-session-token', {
+    expect(api.updateSession).toHaveBeenLastCalledWith({
       callsign: 'ROOKIE-9',
       channel: 9,
     })
@@ -199,10 +196,7 @@ describe('useRadioBackend', () => {
     expect(backend.currentTransmission.value).toEqual(transmission())
 
     await backend.releaseFloor()
-    expect(api.endTransmission).toHaveBeenCalledWith(
-      'new-session-token',
-      'transmission-1',
-    )
+    expect(api.endTransmission).toHaveBeenCalledWith('transmission-1')
     expect(backend.currentTransmission.value).toBeNull()
   })
 

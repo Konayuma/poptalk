@@ -329,21 +329,17 @@ kbd {
   }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 640px) {
   .ptt-shell {
-    min-height: 21.5rem;
+    min-height: 18.5rem;
   }
 
   .ptt-button {
-    width: min(14.5rem, 67vw);
+    width: min(13.5rem, 72vw);
   }
 
-  .ptt-shell__burst--one {
-    left: -1%;
-  }
-
-  .ptt-shell__burst--two {
-    right: 0;
+  .ptt-caption kbd {
+    display: none;
   }
 }
 

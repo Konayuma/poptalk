@@ -8,7 +8,8 @@
   position: relative;
   min-height: 100vh;
   min-height: 100dvh;
-  overflow: hidden;
+  overflow-x: clip;
+  overflow-y: auto;
   padding-bottom: env(safe-area-inset-bottom);
   background:
     radial-gradient(circle at 1px 1px, rgba(17, 17, 17, 0.14) 1.35px, transparent 1.45px) 0 0 /
@@ -253,6 +254,15 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
+}
+
+.icon-button--logout {
+  background: var(--paper);
+}
+
+.icon-button--logout:hover {
+  background: var(--pink);
+  color: white;
 }
 
 .control-room {
@@ -1333,5 +1343,209 @@
 
   .ticker > div {
     translate: 0;
+  }
+}
+
+.auth-boot,
+.auth-shell {
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  min-height: 100dvh;
+  place-items: center;
+  overflow-x: clip;
+  padding: calc(1.2rem + env(safe-area-inset-top)) 1rem calc(1.5rem + env(safe-area-inset-bottom));
+  background:
+    radial-gradient(circle at 1px 1px, rgba(17, 17, 17, 0.14) 1.35px, transparent 1.45px) 0 0 /
+      10px 10px,
+    var(--paper);
+}
+
+.auth-boot {
+  gap: 0.7rem;
+  font-family: var(--font-mono);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-boot strong {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 8vw, 3rem);
+  letter-spacing: 0.04em;
+}
+
+.brand--auth {
+  position: relative;
+  z-index: 2;
+  margin-bottom: 1.2rem;
+  font-size: clamp(2rem, 8vw, 2.6rem);
+}
+
+.auth-card {
+  position: relative;
+  z-index: 2;
+  width: min(100%, 28rem);
+  border: 4px solid var(--ink);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+  box-shadow: var(--shadow-hard);
+  padding: clamp(1.1rem, 4vw, 1.8rem);
+}
+
+.auth-card h1 {
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 6vw, 2.5rem);
+  letter-spacing: 0.02em;
+  line-height: 0.92;
+  text-transform: uppercase;
+}
+
+.auth-card__lede,
+.auth-switch {
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.auth-card__lede {
+  margin: 0.7rem 0 1.1rem;
+}
+
+.auth-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.auth-alert {
+  border: 3px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--pink) 18%, var(--paper));
+  padding: 0.65rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.auth-field {
+  display: grid;
+  gap: 0.28rem;
+}
+
+.auth-field > span {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.auth-field input {
+  width: 100%;
+  border: 3px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  box-shadow: 3px 3px 0 var(--ink);
+  padding: 0.7rem 0.75rem;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.auth-remember {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.auth-remember input {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--pink);
+}
+
+.auth-submit {
+  width: 100%;
+  margin-top: 0.3rem;
+  border: 3px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--yellow);
+  box-shadow: 4px 4px 0 var(--ink);
+  padding: 0.85rem 1rem;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.auth-submit:hover:not(:disabled) {
+  translate: -1px -1px;
+  box-shadow: 5px 5px 0 var(--ink);
+}
+
+.auth-submit:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.auth-switch {
+  margin-top: 1rem;
+}
+
+.auth-switch a {
+  color: var(--ink);
+  font-weight: 900;
+}
+
+@media (max-width: 840px) {
+  .comic-wash {
+    opacity: 0.35;
+  }
+
+  .mode-badge,
+  .topbar__tagline {
+    display: none;
+  }
+
+  .callsign-badge small {
+    max-width: 7.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 640px) {
+  .comic-wash {
+    display: none;
+  }
+
+  .topbar {
+    grid-template-columns: 1fr auto;
+    align-items: start;
+  }
+
+  .topbar__actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .radio-card--talk::before {
+    display: none;
+  }
+
+  .talk-heading {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 420px) {
+  .callsign-badge {
+    display: none;
+  }
+
+  .status-burst span {
+    display: none;
   }
 }

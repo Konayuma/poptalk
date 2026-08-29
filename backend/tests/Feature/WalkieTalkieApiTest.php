@@ -23,42 +23,60 @@ class WalkieTalkieApiTest extends TestCase
 
     public function test_an_operator_can_register_with_a_callsign(): void
     {
-        $response = $this->postJson('/api/operators', [
+        $response = $this->postJson('/api/auth/register', [
+            'name' => 'Pop Seven',
+            'email' => 'pop7@example.com',
             'callsign' => 'pop-7',
+            'password' => 'Password1',
+            'password_confirmation' => 'Password1',
         ]);
 
         $response
             ->assertCreated()
-            ->assertJsonPath('data.operator.callsign', 'POP-7')
-            ->assertJsonStructure([
-                'data' => [
-                    'operator' => ['id', 'callsign'],
-                    'token',
-                ],
-            ]);
+            ->assertJsonPath('data.callsign', 'POP-7')
+            ->assertJsonPath('data.email', 'pop7@example.com');
 
         $this->assertDatabaseHas('users', [
             'callsign' => 'POP-7',
+            'email' => 'pop7@example.com',
         ]);
-        $this->assertNotEmpty($response->json('data.token'));
+        $this->assertAuthenticated();
     }
 
     public function test_duplicate_callsigns_are_rejected(): void
     {
         User::factory()->create(['callsign' => 'ALPHA-1', 'name' => 'ALPHA-1']);
 
-        $this->postJson('/api/operators', ['callsign' => 'alpha-1'])
+        $this->postJson('/api/auth/register', [
+            'name' => 'Alpha',
+            'email' => 'alpha@example.com',
+            'callsign' => 'alpha-1',
+            'password' => 'Password1',
+            'password_confirmation' => 'Password1',
+        ])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('callsign');
     }
 
     public function test_invalid_callsigns_are_rejected(): void
     {
-        $this->postJson('/api/operators', ['callsign' => 'x'])
+        $this->postJson('/api/auth/register', [
+            'name' => 'Tiny',
+            'email' => 'tiny@example.com',
+            'callsign' => 'x',
+            'password' => 'Password1',
+            'password_confirmation' => 'Password1',
+        ])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('callsign');
 
-        $this->postJson('/api/operators', ['callsign' => 'no_underscores!'])
+        $this->postJson('/api/auth/register', [
+            'name' => 'Bad Sign',
+            'email' => 'bad@example.com',
+            'callsign' => 'no_underscores!',
+            'password' => 'Password1',
+            'password_confirmation' => 'Password1',
+        ])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('callsign');
     }
@@ -68,6 +86,7 @@ class WalkieTalkieApiTest extends TestCase
         $this->getJson('/api/frequencies')->assertUnauthorized();
         $this->postJson('/api/frequencies/1/join')->assertUnauthorized();
         $this->postJson('/api/frequencies/1/ptt/start')->assertUnauthorized();
+        $this->postJson('/api/v1/sessions', ['channel' => 1])->assertUnauthorized();
     }
 
     public function test_it_lists_all_ninety_nine_frequencies(): void
@@ -174,8 +193,8 @@ class WalkieTalkieApiTest extends TestCase
         Sanctum::actingAs(User::factory()->create());
 
         $this->postJson('/api/frequencies/4/ptt/start')
-            ->assertForbidden()
-            ->assertJsonPath('message', 'You must join this frequency first.');
+            ->assertUnauthorized()
+            ->assertJsonPath('code', 'radio_session_expired');
     }
 
     public function test_expired_ptt_locks_are_released(): void

@@ -30,12 +30,12 @@ class CreateSessionRequest extends FormRequest
     {
         return [
             'callsign' => [
-                'required',
+                'sometimes',
                 'string',
                 'min:'.config('poptalk.callsign.min'),
                 'max:'.config('poptalk.callsign.max'),
                 'regex:'.config('poptalk.callsign.pattern'),
-                Rule::unique('users', 'callsign'),
+                Rule::unique('users', 'callsign')->ignore($this->user()),
             ],
             'channel' => [
                 'required',

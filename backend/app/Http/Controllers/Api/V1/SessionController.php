@@ -18,17 +18,18 @@ class SessionController extends Controller
         CreateSessionRequest $request,
         WalkieTalkieService $walkieTalkie,
     ): JsonResponse {
-        $registration = $walkieTalkie->register($request->validated('callsign'));
         $frequency = Frequency::query()
             ->where('number', $request->integer('channel'))
             ->firstOrFail();
-        $walkieTalkie->join($registration['operator'], $frequency);
-        $operator = $registration['operator']->fresh(['membership.frequency']);
+        $operator = $walkieTalkie->updateSession(
+            $request->user(),
+            $request->validated('callsign') ?? $request->user()->callsign,
+            $frequency,
+        );
 
         return response()->json([
             'data' => (new RadioSessionResource($operator))->resolve($request),
             'meta' => [
-                'session_token' => $registration['token']->plainTextToken,
                 'heartbeat_interval_seconds' => (int) config('poptalk.heartbeat_interval_seconds'),
                 'presence_ttl_seconds' => (int) config('poptalk.presence_ttl_seconds'),
                 'server_time' => now()->toIso8601String(),

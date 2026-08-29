@@ -1,3 +1,7 @@
+import { ApiError, apiRequest, jsonBody } from './http'
+
+export { ApiError as RadioApiError }
+
 export interface RadioSession {
   id: string
   callsign: string
@@ -26,7 +30,6 @@ export interface ChannelStatus {
 export interface SessionResponse {
   data: RadioSession
   meta: {
-    session_token: string
     heartbeat_interval_seconds: number
     presence_ttl_seconds: number
     server_time: string
@@ -38,139 +41,57 @@ export interface ResourceResponse<T> {
   meta?: Record<string, unknown>
 }
 
-interface ApiErrorPayload {
-  message?: string
-  code?: string
-  errors?: Record<string, string[]>
-}
-
-export class RadioApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly code = 'request_failed',
-    readonly errors: Record<string, string[]> = {},
-  ) {
-    super(message)
-    this.name = 'RadioApiError'
-  }
-}
-
 const API_BASE_URL = (import.meta.env.VITE_API_URL || '/api/v1').replace(/\/$/, '')
-const REQUEST_TIMEOUT_MS = 8_000
 
-async function request<T>(
-  path: string,
-  options: RequestInit = {},
-  token?: string,
-): Promise<T> {
-  const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-  const headers = new Headers(options.headers)
-  headers.set('Accept', 'application/json')
-
-  if (options.body !== undefined) headers.set('Content-Type', 'application/json')
-  if (token) headers.set('Authorization', `Bearer ${token}`)
-
-  try {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
-      headers,
-      signal: controller.signal,
-    })
-
-    if (response.status === 204) return undefined as T
-
-    const payload = (await response.json().catch(() => ({}))) as ApiErrorPayload | T
-
-    if (!response.ok) {
-      const error = payload as ApiErrorPayload
-      throw new RadioApiError(
-        error.message || `The radio API returned ${response.status}.`,
-        response.status,
-        error.code,
-        error.errors,
-      )
-    }
-
-    return payload as T
-  } catch (error) {
-    if (error instanceof RadioApiError) throw error
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new RadioApiError('The radio server did not respond in time.', 0, 'timeout')
-    }
-
-    throw new RadioApiError(
-      'The radio server is unavailable. Check that the backend is running.',
-      0,
-      'network_error',
-    )
-  } finally {
-    window.clearTimeout(timeout)
-  }
-}
-
-function jsonBody(data: object): Pick<RequestInit, 'body'> {
-  return { body: JSON.stringify(data) }
+function radioPath(path: string): string {
+  return `${API_BASE_URL}${path}`
 }
 
 export const radioApi = {
   health: () =>
-    request<ResourceResponse<{ service: string; status: string; server_time: string }>>('/health'),
+    apiRequest<ResourceResponse<{ service: string; status: string; server_time: string }>>(
+      radioPath('/health'),
+    ),
 
   createSession: (callsign: string, channel: number) =>
-    request<SessionResponse>('/sessions', {
+    apiRequest<SessionResponse>(radioPath('/sessions'), {
       method: 'POST',
       ...jsonBody({ callsign, channel }),
     }),
 
-  currentSession: (token: string) =>
-    request<ResourceResponse<RadioSession>>('/sessions/current', {}, token),
+  currentSession: () => apiRequest<ResourceResponse<RadioSession>>(radioPath('/sessions/current')),
 
-  updateSession: (token: string, changes: Partial<Pick<RadioSession, 'callsign' | 'channel'>>) =>
-    request<ResourceResponse<RadioSession>>(
-      '/sessions/current',
-      {
-        method: 'PATCH',
-        ...jsonBody(changes),
-      },
-      token,
-    ),
+  updateSession: (changes: Partial<Pick<RadioSession, 'callsign' | 'channel'>>) =>
+    apiRequest<ResourceResponse<RadioSession>>(radioPath('/sessions/current'), {
+      method: 'PATCH',
+      ...jsonBody(changes),
+    }),
 
-  heartbeatSession: (token: string) =>
-    request<ResourceResponse<RadioSession>>(
-      '/sessions/current/heartbeat',
-      { method: 'POST' },
-      token,
-    ),
+  heartbeatSession: () =>
+    apiRequest<ResourceResponse<RadioSession>>(radioPath('/sessions/current/heartbeat'), {
+      method: 'POST',
+    }),
 
-  endSession: (token: string) =>
-    request<void>('/sessions/current', { method: 'DELETE' }, token),
+  endSession: () => apiRequest<void>(radioPath('/sessions/current'), { method: 'DELETE' }),
 
-  channel: (token: string, channel: number) =>
-    request<ResourceResponse<ChannelStatus>>(`/channels/${channel}`, {}, token),
+  channel: (channel: number) =>
+    apiRequest<ResourceResponse<ChannelStatus>>(radioPath(`/channels/${channel}`)),
 
-  channels: (token: string) =>
-    request<ResourceResponse<ChannelStatus[]>>('/channels', {}, token),
+  channels: () => apiRequest<ResourceResponse<ChannelStatus[]>>(radioPath('/channels')),
 
-  startTransmission: (token: string, channel: number) =>
-    request<ResourceResponse<Transmission>>(
-      `/channels/${channel}/transmissions`,
-      { method: 'POST' },
-      token,
-    ),
+  startTransmission: (channel: number) =>
+    apiRequest<ResourceResponse<Transmission>>(radioPath(`/channels/${channel}/transmissions`), {
+      method: 'POST',
+    }),
 
-  heartbeatTransmission: (token: string, transmissionId: string) =>
-    request<ResourceResponse<Transmission>>(
-      `/transmissions/${encodeURIComponent(transmissionId)}`,
+  heartbeatTransmission: (transmissionId: string) =>
+    apiRequest<ResourceResponse<Transmission>>(
+      radioPath(`/transmissions/${encodeURIComponent(transmissionId)}`),
       { method: 'PATCH' },
-      token,
     ),
 
-  endTransmission: (token: string, transmissionId: string) =>
-    request<void>(
-      `/transmissions/${encodeURIComponent(transmissionId)}`,
-      { method: 'DELETE' },
-      token,
-    ),
+  endTransmission: (transmissionId: string) =>
+    apiRequest<void>(radioPath(`/transmissions/${encodeURIComponent(transmissionId)}`), {
+      method: 'DELETE',
+    }),
 }

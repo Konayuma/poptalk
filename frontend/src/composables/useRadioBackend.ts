@@ -9,10 +9,16 @@ import {
 
 export type BackendConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnected'
 
-const SESSION_TOKEN_KEY = 'poptalk.radio-session-token'
 const STATUS_REFRESH_INTERVAL_MS = 4_000
 const HEARTBEAT_INTERVAL_MS = 10_000
 const RECONNECT_DELAY_MS = 5_000
+
+function isExpiredRadioSession(error: unknown) {
+  return (
+    error instanceof RadioApiError &&
+    (error.status === 401 || error.code === 'radio_session_expired' || error.code === 'invalid_session_token')
+  )
+}
 
 export function useRadioBackend() {
   const connectionState = ref<BackendConnectionState>('idle')
@@ -22,7 +28,6 @@ export function useRadioBackend() {
   const channelStatus = shallowRef<ChannelStatus | null>(null)
   const currentTransmission = shallowRef<Transmission | null>(null)
 
-  let token = readSessionToken()
   let desiredCallsign = 'ROOKIE-7'
   let desiredChannel = 7
   let connectPromise: Promise<boolean> | null = null
@@ -31,6 +36,7 @@ export function useRadioBackend() {
   let heartbeatTimer = 0
   let reconnectTimer = 0
   let disposed = false
+  let radioSessionOpen = false
 
   const remotePeerCount = computed(() => {
     const listenerCount = channelStatus.value?.listener_count ?? 0
@@ -46,27 +52,6 @@ export function useRadioBackend() {
       activeSpeaker.value !== null &&
       activeSpeaker.value.session_id !== session.value?.id,
   )
-
-  function readSessionToken() {
-    try {
-      return window.sessionStorage.getItem(SESSION_TOKEN_KEY) ?? ''
-    } catch {
-      return ''
-    }
-  }
-
-  function storeSessionToken(nextToken: string) {
-    token = nextToken
-    try {
-      if (nextToken) {
-        window.sessionStorage.setItem(SESSION_TOKEN_KEY, nextToken)
-      } else {
-        window.sessionStorage.removeItem(SESSION_TOKEN_KEY)
-      }
-    } catch {
-      // Session continuity is optional when browser storage is unavailable.
-    }
-  }
 
   function stopTimers() {
     window.clearInterval(statusTimer)
@@ -91,6 +76,7 @@ export function useRadioBackend() {
     if (disposed) return
     connectionState.value = 'disconnected'
     connectionError.value = errorMessage(error)
+    radioSessionOpen = false
     stopTimers()
     scheduleReconnect()
   }
@@ -104,13 +90,13 @@ export function useRadioBackend() {
   }
 
   async function restoreSession() {
-    if (!token) return null
-
     try {
-      return (await radioApi.currentSession(token)).data
+      const restored = (await radioApi.currentSession()).data
+      radioSessionOpen = true
+      return restored
     } catch (error) {
-      if (error instanceof RadioApiError && error.status === 401) {
-        storeSessionToken('')
+      if (isExpiredRadioSession(error)) {
+        radioSessionOpen = false
         return null
       }
 
@@ -136,9 +122,8 @@ export function useRadioBackend() {
         if (disposed) return false
 
         if (restoredSession === null) {
-          const response = await radioApi.createSession(desiredCallsign, desiredChannel)
-          storeSessionToken(response.meta.session_token)
-          restoredSession = response.data
+          restoredSession = (await radioApi.createSession(desiredCallsign, desiredChannel)).data
+          radioSessionOpen = true
         }
 
         while (
@@ -146,7 +131,7 @@ export function useRadioBackend() {
           restoredSession.channel !== desiredChannel
         ) {
           restoredSession = (
-            await radioApi.updateSession(token, {
+            await radioApi.updateSession({
               callsign: desiredCallsign,
               channel: desiredChannel,
             })
@@ -158,6 +143,7 @@ export function useRadioBackend() {
         session.value = restoredSession
         connectionState.value = 'connected'
         connectionError.value = ''
+        radioSessionOpen = true
         startTimers()
         await refreshChannel()
 
@@ -174,11 +160,11 @@ export function useRadioBackend() {
   }
 
   async function refreshChannel(): Promise<boolean> {
-    if (!token || connectionState.value !== 'connected') return false
+    if (!radioSessionOpen || connectionState.value !== 'connected') return false
 
     try {
       const requestedChannel = desiredChannel
-      const response = await radioApi.channel(token, requestedChannel)
+      const response = await radioApi.channel(requestedChannel)
 
       if (requestedChannel !== desiredChannel) return refreshChannel()
 
@@ -206,7 +192,7 @@ export function useRadioBackend() {
       return updateIdentity(desiredCallsign, desiredChannel)
     }
 
-    if (!token || session.value === null || connectionState.value !== 'connected') {
+    if (!radioSessionOpen || session.value === null || connectionState.value !== 'connected') {
       return connect(callsign, channel)
     }
 
@@ -224,7 +210,7 @@ export function useRadioBackend() {
     identityPromise = (async () => {
       try {
         session.value = (
-          await radioApi.updateSession(token, {
+          await radioApi.updateSession({
             callsign: requestedCallsign,
             channel: requestedChannel,
           })
@@ -253,7 +239,7 @@ export function useRadioBackend() {
   }
 
   async function claimFloor(channel: number): Promise<boolean> {
-    if (!token || connectionState.value !== 'connected') {
+    if (!radioSessionOpen || connectionState.value !== 'connected') {
       connectionError.value = 'Connect to the radio server before transmitting.'
       return false
     }
@@ -269,7 +255,7 @@ export function useRadioBackend() {
     }
 
     try {
-      currentTransmission.value = (await radioApi.startTransmission(token, channel)).data
+      currentTransmission.value = (await radioApi.startTransmission(channel)).data
       connectionError.value = ''
       await refreshChannel()
       return true
@@ -289,10 +275,10 @@ export function useRadioBackend() {
     const transmission = currentTransmission.value
     currentTransmission.value = null
 
-    if (!token || transmission === null) return
+    if (!radioSessionOpen || transmission === null) return
 
     try {
-      await radioApi.endTransmission(token, transmission.id)
+      await radioApi.endTransmission(transmission.id)
       connectionError.value = ''
       await refreshChannel()
     } catch (error) {
@@ -306,15 +292,15 @@ export function useRadioBackend() {
   }
 
   async function heartbeat() {
-    if (!token || connectionState.value !== 'connected') return
+    if (!radioSessionOpen || connectionState.value !== 'connected') return
 
     try {
-      session.value = (await radioApi.heartbeatSession(token)).data
+      session.value = (await radioApi.heartbeatSession()).data
 
       if (currentTransmission.value !== null) {
         try {
           currentTransmission.value = (
-            await radioApi.heartbeatTransmission(token, currentTransmission.value.id)
+            await radioApi.heartbeatTransmission(currentTransmission.value.id)
           ).data
         } catch (error) {
           if (!(error instanceof RadioApiError) || error.status !== 404) throw error
@@ -332,15 +318,15 @@ export function useRadioBackend() {
     stopTimers()
     currentTransmission.value = null
 
-    if (token) {
+    if (radioSessionOpen) {
       try {
-        await radioApi.endSession(token)
+        await radioApi.endSession()
       } catch {
         // Presence expires automatically if the final request cannot be delivered.
       }
     }
 
-    storeSessionToken('')
+    radioSessionOpen = false
     session.value = null
     channelStatus.value = null
     isSyncingIdentity.value = false

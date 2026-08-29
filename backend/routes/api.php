@@ -2,7 +2,6 @@
 
 use App\Http\Controllers\Api\FrequencyController;
 use App\Http\Controllers\Api\MeController;
-use App\Http\Controllers\Api\OperatorController;
 use App\Http\Controllers\Api\PttController;
 use App\Http\Controllers\Api\SignalController;
 use App\Http\Controllers\Api\V1\ChannelController;
@@ -21,11 +20,12 @@ Route::prefix('v1')->group(function (): void {
             ],
         ]);
     });
-    Route::post('/sessions', [SessionController::class, 'store'])
-        ->middleware('throttle:operators');
 
-    Route::middleware(['auth:sanctum', EnsureRadioSessionIsActive::class])
-        ->group(function (): void {
+    Route::middleware('auth:sanctum')->group(function (): void {
+        Route::post('/sessions', [SessionController::class, 'store'])
+            ->middleware('throttle:operators');
+
+        Route::middleware(EnsureRadioSessionIsActive::class)->group(function (): void {
             Route::get('/sessions/current', [SessionController::class, 'show']);
             Route::patch('/sessions/current', [SessionController::class, 'update']);
             Route::delete('/sessions/current', [SessionController::class, 'destroy']);
@@ -38,24 +38,25 @@ Route::prefix('v1')->group(function (): void {
             Route::patch('/transmissions/{transmission}', [TransmissionController::class, 'update']);
             Route::delete('/transmissions/{transmission}', [TransmissionController::class, 'destroy']);
         });
+    });
 });
 
-Route::post('/operators', [OperatorController::class, 'store'])
-    ->middleware('throttle:operators');
-
-Route::middleware(['auth:sanctum', EnsureRadioSessionIsActive::class])->group(function (): void {
+Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('/me', [MeController::class, 'show']);
     Route::post('/me/heartbeat', [MeController::class, 'heartbeat']);
 
     Route::get('/frequencies', [FrequencyController::class, 'index']);
     Route::get('/frequencies/{frequency}', [FrequencyController::class, 'show']);
     Route::post('/frequencies/{frequency}/join', [FrequencyController::class, 'join']);
-    Route::post('/frequencies/{frequency}/leave', [FrequencyController::class, 'leave']);
 
-    Route::post('/frequencies/{frequency}/ptt/start', [PttController::class, 'start']);
-    Route::post('/frequencies/{frequency}/ptt/stop', [PttController::class, 'stop']);
+    Route::middleware(EnsureRadioSessionIsActive::class)->group(function (): void {
+        Route::post('/frequencies/{frequency}/leave', [FrequencyController::class, 'leave']);
 
-    Route::get('/frequencies/{frequency}/signals', [SignalController::class, 'index']);
-    Route::post('/frequencies/{frequency}/signals', [SignalController::class, 'store'])
-        ->middleware('throttle:signals');
+        Route::post('/frequencies/{frequency}/ptt/start', [PttController::class, 'start']);
+        Route::post('/frequencies/{frequency}/ptt/stop', [PttController::class, 'stop']);
+
+        Route::get('/frequencies/{frequency}/signals', [SignalController::class, 'index']);
+        Route::post('/frequencies/{frequency}/signals', [SignalController::class, 'store'])
+            ->middleware('throttle:signals');
+    });
 });

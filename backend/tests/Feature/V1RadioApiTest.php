@@ -3,32 +3,45 @@
 namespace Tests\Feature;
 
 use App\Models\Frequency;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 class V1RadioApiTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_public_health_and_session_contract_matches_the_frontend(): void
+    public function test_public_health_is_available_without_authentication(): void
     {
         $this->getJson('/api/v1/health')
             ->assertOk()
             ->assertJsonPath('data.service', 'poptalk')
             ->assertJsonPath('data.status', 'ok')
-            ->assertJsonStructure(['data' => ['service', 'status', 'server_time']]);
+            ->assertJsonStructure(['data' => ['service', 'status', 'server_time']])
+            ->assertHeader('X-Frame-Options', 'DENY')
+            ->assertHeader('X-Content-Type-Options', 'nosniff');
+    }
 
-        $response = $this->postJson('/api/v1/sessions', [
-            'callsign' => 'rookie-7',
+    public function test_opening_a_radio_session_requires_authentication(): void
+    {
+        $this->postJson('/api/v1/sessions', [
+            'callsign' => 'ROOKIE-7',
             'channel' => 7,
-        ]);
+        ])->assertUnauthorized();
+    }
 
-        $response
-            ->assertCreated()
+    public function test_authenticated_session_contract_matches_the_frontend(): void
+    {
+        $user = $this->createSession('ROOKIE-7', 7);
+
+        $this->getJson('/api/v1/sessions/current')
+            ->assertOk()
             ->assertJsonPath('data.callsign', 'ROOKIE-7')
             ->assertJsonPath('data.channel', 7)
+            ->assertJsonPath('data.id', $user->uuid)
             ->assertJsonStructure([
                 'data' => [
                     'id',
@@ -37,38 +50,22 @@ class V1RadioApiTest extends TestCase
                     'last_seen_at',
                     'connected_at',
                 ],
-                'meta' => [
-                    'session_token',
-                    'heartbeat_interval_seconds',
-                    'presence_ttl_seconds',
-                    'server_time',
-                ],
             ]);
-
-        $token = $response->json('meta.session_token');
-
-        $this->withToken($token)
-            ->getJson('/api/v1/sessions/current')
-            ->assertOk()
-            ->assertJsonPath('data.callsign', 'ROOKIE-7')
-            ->assertJsonPath('data.channel', 7);
     }
 
     public function test_session_identity_and_channel_can_be_updated(): void
     {
-        $token = $this->createSession('ALPHA-1', 1);
+        $this->createSession('ALPHA-1', 1);
 
-        $this->withToken($token)
-            ->patchJson('/api/v1/sessions/current', [
-                'callsign' => 'bravo-2',
-                'channel' => 2,
-            ])
+        $this->patchJson('/api/v1/sessions/current', [
+            'callsign' => 'bravo-2',
+            'channel' => 2,
+        ])
             ->assertOk()
             ->assertJsonPath('data.callsign', 'BRAVO-2')
             ->assertJsonPath('data.channel', 2);
 
-        $this->withToken($token)
-            ->getJson('/api/v1/channels/2')
+        $this->getJson('/api/v1/channels/2')
             ->assertOk()
             ->assertJsonPath('data.number', 2)
             ->assertJsonPath('data.listener_count', 1)
@@ -82,10 +79,9 @@ class V1RadioApiTest extends TestCase
 
     public function test_transmissions_can_be_claimed_renewed_and_released(): void
     {
-        $token = $this->createSession('TALKER-1', 8);
+        $this->createSession('TALKER-1', 8);
 
-        $started = $this->withToken($token)
-            ->postJson('/api/v1/channels/8/transmissions')
+        $started = $this->postJson('/api/v1/channels/8/transmissions')
             ->assertOk()
             ->assertJsonPath('data.callsign', 'TALKER-1')
             ->assertJsonPath('data.channel', 8)
@@ -107,19 +103,15 @@ class V1RadioApiTest extends TestCase
 
         Carbon::setTestNow(now()->addSeconds(20));
 
-        $this->withToken($token)
-            ->patchJson('/api/v1/transmissions/'.$transmissionId)
+        $this->patchJson('/api/v1/transmissions/'.$transmissionId)
             ->assertOk()
             ->assertJsonPath('data.id', $transmissionId)
-            ->assertJsonPath('data.callsign', 'TALKER-1')
             ->assertJsonMissingExact(['last_seen_at' => $firstHeartbeat]);
 
-        $this->withToken($token)
-            ->deleteJson('/api/v1/transmissions/'.$transmissionId)
+        $this->deleteJson('/api/v1/transmissions/'.$transmissionId)
             ->assertNoContent();
 
-        $this->withToken($token)
-            ->getJson('/api/v1/channels/8')
+        $this->getJson('/api/v1/channels/8')
             ->assertOk()
             ->assertJsonPath('data.is_busy', false)
             ->assertJsonPath('data.active_transmission', null);
@@ -129,63 +121,76 @@ class V1RadioApiTest extends TestCase
 
     public function test_busy_transmissions_return_the_structured_frontend_error(): void
     {
-        $talkerToken = $this->createSession('TALKER-2', 9);
-        $listenerToken = $this->createSession('LISTENER-2', 9);
+        $talker = $this->createSession('TALKER-2', 9);
+        $listener = User::factory()->create(['callsign' => 'LISTENER-2', 'name' => 'LISTENER-2']);
 
-        $this->withToken($talkerToken)
-            ->postJson('/api/v1/channels/9/transmissions')
-            ->assertOk();
+        $this->postJson('/api/v1/channels/9/transmissions')->assertOk();
 
         Auth::forgetGuards();
+        Sanctum::actingAs($listener);
+        $this->postJson('/api/v1/sessions', [
+            'callsign' => 'LISTENER-2',
+            'channel' => 9,
+        ])->assertCreated();
 
-        $this->withToken($listenerToken)
-            ->postJson('/api/v1/channels/9/transmissions')
+        $this->postJson('/api/v1/channels/9/transmissions')
             ->assertConflict()
             ->assertJsonPath('code', 'channel_busy')
             ->assertJsonPath('errors.channel.0', 'Wait for the current caller to release PTT.');
+
+        $this->assertTrue($talker->is($talker->fresh()));
     }
 
-    public function test_ending_a_session_releases_presence_and_revokes_its_token(): void
+    public function test_ending_a_session_releases_presence_but_keeps_the_account(): void
     {
-        $token = $this->createSession('SIGN-OFF', 11);
+        $this->createSession('SIGN-OFF', 11);
 
-        $this->withToken($token)
-            ->deleteJson('/api/v1/sessions/current')
-            ->assertNoContent();
+        $this->deleteJson('/api/v1/sessions/current')->assertNoContent();
 
-        Auth::forgetGuards();
-
-        $this->withToken($token)
-            ->getJson('/api/v1/sessions/current')
-            ->assertUnauthorized();
+        $this->getJson('/api/v1/sessions/current')
+            ->assertUnauthorized()
+            ->assertJsonPath('code', 'radio_session_expired');
 
         $this->assertDatabaseCount('frequency_memberships', 0);
-        $this->assertDatabaseMissing('users', ['callsign' => 'SIGN-OFF']);
+        $this->assertDatabaseHas('users', ['callsign' => 'SIGN-OFF']);
     }
 
-    public function test_stale_sessions_are_rejected_and_removed(): void
+    public function test_stale_sessions_are_rejected_without_deleting_the_account(): void
     {
-        $token = $this->createSession('STALE-1', 12);
+        $this->createSession('STALE-1', 12);
 
         Carbon::setTestNow(
             now()->addSeconds((int) config('poptalk.presence_ttl_seconds') + 1)
         );
 
-        $this->withToken($token)
-            ->getJson('/api/v1/sessions/current')
+        $this->getJson('/api/v1/sessions/current')
             ->assertUnauthorized()
-            ->assertJsonPath('code', 'invalid_session_token');
+            ->assertJsonPath('code', 'radio_session_expired');
 
-        $this->assertDatabaseMissing('users', ['callsign' => 'STALE-1']);
+        $this->assertDatabaseHas('users', ['callsign' => 'STALE-1']);
+        $this->assertDatabaseCount('frequency_memberships', 0);
 
         Carbon::setTestNow();
     }
 
-    private function createSession(string $callsign, int $channel): string
+    private function createSession(string $callsign, int $channel): User
     {
-        return $this->postJson('/api/v1/sessions', [
+        $normalized = strtoupper($callsign);
+        $user = User::factory()->create([
+            'callsign' => $normalized,
+            'name' => $normalized,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/v1/sessions', [
             'callsign' => $callsign,
             'channel' => $channel,
-        ])->assertCreated()->json('meta.session_token');
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.callsign', $normalized)
+            ->assertJsonPath('data.channel', $channel);
+
+        return $user;
     }
 }

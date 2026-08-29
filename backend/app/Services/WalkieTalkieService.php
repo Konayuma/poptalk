@@ -21,25 +21,23 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use Laravel\Sanctum\NewAccessToken;
 
 class WalkieTalkieService
 {
-    /**
-     * @return array{operator: User, token: NewAccessToken}
-     */
-    public function register(string $callsign): array
-    {
+    public function createAccount(
+        string $email,
+        string $password,
+        string $callsign,
+        string $name,
+    ): User {
         $callsign = $this->normalizeCallsign($callsign);
-        $uuid = (string) Str::uuid();
 
         try {
-            $operator = User::query()->create([
-                'name' => $callsign,
+            return User::query()->create([
+                'name' => $name,
                 'callsign' => $callsign,
-                'uuid' => $uuid,
-                'email' => $uuid.'@operators.poptalk.local',
-                'password' => Str::password(32),
+                'email' => $email,
+                'password' => $password,
                 'last_seen_at' => now(),
             ]);
         } catch (UniqueConstraintViolationException $exception) {
@@ -49,13 +47,14 @@ class WalkieTalkieService
                 ]);
             }
 
+            if (User::query()->where('email', $email)->exists()) {
+                throw ValidationException::withMessages([
+                    'email' => ['This email is already registered.'],
+                ]);
+            }
+
             throw $exception;
         }
-
-        return [
-            'operator' => $operator,
-            'token' => $operator->createToken('poptalk'),
-        ];
     }
 
     public function heartbeat(User $operator): ?Frequency
@@ -442,8 +441,8 @@ class WalkieTalkieService
             $this->leave($operator, $membership->frequency);
         }
 
+        $operator->unsetRelation('membership');
         $operator->tokens()->delete();
-        $operator->delete();
     }
 
     public function heartbeatTransmission(User $operator, string $transmissionId): Frequency
@@ -657,28 +656,6 @@ class WalkieTalkieService
                 }
 
                 OperatorLeftFrequency::dispatch($result['frequency'], $result['operator']);
-            });
-
-        User::query()
-            ->where('last_seen_at', '<=', $presenceCutoff)
-            ->whereDoesntHave('membership')
-            ->get()
-            ->each(function (User $operator): void {
-                DB::transaction(function () use ($operator): void {
-                    $lockedOperator = User::query()
-                        ->whereKey($operator->id)
-                        ->lockForUpdate()
-                        ->first();
-
-                    if ($lockedOperator === null
-                        || ! $lockedOperator->isStale()
-                        || $lockedOperator->membership()->exists()) {
-                        return;
-                    }
-
-                    $lockedOperator->tokens()->delete();
-                    $lockedOperator->delete();
-                });
             });
 
         FrequencySignal::query()
